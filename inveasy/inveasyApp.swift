@@ -2,16 +2,21 @@
 //  inveasyApp.swift
 //  inveasy
 //
-//  Created by Ricardo ER on 07/06/26.
-//
 
 import SwiftUI
 
 @main
 struct inveasyApp: App {
+    @State private var appState = AppState()
+    @State private var cart = CartStore()
+    @AppStorage("appearance") private var appearance: AppAppearance = .system
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            RootView()
+                .environment(appState)
+                .environment(cart)
+                .preferredColorScheme(appearance.colorScheme)
         }
     }
 }
