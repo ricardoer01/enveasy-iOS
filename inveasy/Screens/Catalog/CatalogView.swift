@@ -119,8 +119,13 @@ private struct ProductsGrid: View {
     var body: some View {
         ScrollView {
             if store.isLoadingPage && store.products.isEmpty {
-                ProgressView()
-                    .padding(.top, 60)
+                LazyVGrid(columns: columns, spacing: 12) {
+                    ForEach(0..<6, id: \.self) { _ in
+                        ProductCardSkeleton()
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.top, 8)
             } else if store.products.isEmpty {
                 ContentUnavailableView(
                     "Sin resultados",
@@ -130,14 +135,17 @@ private struct ProductsGrid: View {
                 .padding(.top, 60)
             } else {
                 LazyVGrid(columns: columns, spacing: 12) {
-                    ForEach(store.products) { product in
+                    ForEach(Array(store.products.enumerated()), id: \.element.id) { index, product in
                         NavigationLink(value: product.id) {
                             ProductCard(product: product)
                         }
                         .buttonStyle(.plain)
                         .task {
-                            // Last-row paging trigger
-                            if product.id == store.products.last?.id {
+                            // Prefetch the next page when the user is within 5
+                            // items of the end, so the next batch is ready by
+                            // the time they scroll into it. `loadNextPage` is
+                            // a no-op while a load is in flight or exhausted.
+                            if index >= store.products.count - 5 {
                                 await store.loadNextPage()
                             }
                         }

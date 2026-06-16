@@ -30,6 +30,11 @@ actor APIClient {
     private let session: URLSession
     private let tokenStorage: TokenStorage
     private var refreshTask: Task<TokenPair, Error>?
+    private var proactiveRefreshTask: Task<Void, Never>?
+
+    /// How long to wait between proactive refreshes. The access token lives
+    /// for 15 minutes; refresh at the 12-minute mark to avoid a 401 mid-call.
+    private let proactiveRefreshInterval: Duration = .seconds(12 * 60)
 
     init(
         hubURL: URL = APIClient.defaultHubURL,
@@ -75,11 +80,29 @@ actor APIClient {
     /// Replace the stored token pair (e.g. after a successful login/register).
     func setTokens(_ pair: TokenPair) throws {
         try tokenStorage.save(pair)
+        startProactiveRefresh()
     }
 
     /// Clear the stored token pair (e.g. after logout).
     func clearTokens() throws {
+        cancelProactiveRefresh()
         try tokenStorage.clear()
+    }
+
+    /// Arm the proactive-refresh loop. Called from `setTokens` automatically;
+    /// `AppState` calls it on launch when tokens are already persisted so the
+    /// loop survives across cold starts.
+    func startProactiveRefresh() {
+        cancelProactiveRefresh()
+        proactiveRefreshTask = Task { [weak self] in
+            await self?.proactiveRefreshLoop()
+        }
+    }
+
+    /// Stop the proactive-refresh loop. Safe to call when no task is running.
+    func cancelProactiveRefresh() {
+        proactiveRefreshTask?.cancel()
+        proactiveRefreshTask = nil
     }
 
     /// Whether a token pair is currently persisted.
@@ -211,10 +234,31 @@ actor APIClient {
         refreshTask = task
 
         do {
-            return try await task.value
+            let pair = try await task.value
+            // Reset the proactive timer relative to this fresh pair.
+            startProactiveRefresh()
+            return pair
         } catch {
             try? tokenStorage.clear()
+            cancelProactiveRefresh()
             throw APIError.unauthorized(message: "Session expired")
+        }
+    }
+
+    /// Sleeps for the refresh interval then attempts a refresh. Loops until
+    /// cancelled (logout) or the refresh token is rejected. Failures are
+    /// **swallowed**: a transient network error here shouldn't log the user
+    /// out — the next real API call's reactive 401 path will handle a truly
+    /// expired refresh token.
+    private func proactiveRefreshLoop() async {
+        while !Task.isCancelled {
+            do {
+                try await Task.sleep(for: proactiveRefreshInterval)
+            } catch {
+                return
+            }
+            if Task.isCancelled { return }
+            _ = try? await performRefresh()
         }
     }
 

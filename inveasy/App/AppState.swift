@@ -35,6 +35,9 @@ final class AppState {
         let hasTokens = await client.hasTokens()
         if hasTokens, let customer = profile.load() {
             auth = .signedIn(customer)
+            // The token pair survived from a previous launch — arm the
+            // proactive refresh timer so the session stays fresh.
+            await client.startProactiveRefresh()
         } else {
             // Tokens without profile, or profile without tokens, means we're in
             // an inconsistent state — clear both and start fresh.

@@ -33,8 +33,11 @@ struct OrdersView: View {
     @ViewBuilder
     private var content: some View {
         if store.isLoadingPage && store.orders.isEmpty {
-            ProgressView()
-                .controlSize(.large)
+            List {
+                ForEach(0..<5, id: \.self) { _ in
+                    OrderRowSkeleton()
+                }
+            }
         } else if store.orders.isEmpty {
             ContentUnavailableView(
                 "Aún no tienes pedidos",
@@ -43,12 +46,13 @@ struct OrdersView: View {
             )
         } else {
             List {
-                ForEach(store.orders) { order in
+                ForEach(Array(store.orders.enumerated()), id: \.element.id) { index, order in
                     NavigationLink(value: order.id) {
                         OrderRow(order: order)
                     }
                     .task {
-                        if order.id == store.orders.last?.id {
+                        // Prefetch when within 5 rows of the end.
+                        if index >= store.orders.count - 5 {
                             await store.loadNextPage()
                         }
                     }

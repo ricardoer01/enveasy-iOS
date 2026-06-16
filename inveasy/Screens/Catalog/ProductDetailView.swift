@@ -14,6 +14,7 @@ struct ProductDetailView: View {
     @State private var errorMessage: String?
     @State private var isLoading = false
     @State private var didAdd = false
+    @State private var quantity: Decimal = 1
 
     var body: some View {
         ScrollView {
@@ -84,8 +85,21 @@ struct ProductDetailView: View {
                         .font(.body)
                 }
 
+                Stepper(value: $quantity, in: 1...9_999, step: 1) {
+                    HStack {
+                        Text("Cantidad")
+                        Spacer()
+                        Text(formattedQuantity)
+                            .monospacedDigit()
+                            .bold()
+                    }
+                }
+                .padding(.top, 8)
+                .disabled(!product.isInStock)
+
                 Button {
-                    cart.add(product: product)
+                    cart.add(product: product, quantity: quantity)
+                    Haptics.impact(.medium)
                     didAdd = true
                 } label: {
                     Label(
@@ -98,7 +112,7 @@ struct ProductDetailView: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .disabled(!product.isInStock)
-                .padding(.top, 8)
+                .padding(.top, 4)
                 .animation(.default, value: didAdd)
             }
             .padding(.horizontal)
@@ -117,6 +131,13 @@ struct ProductDetailView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private var formattedQuantity: String {
+        let formatter = NumberFormatter()
+        formatter.minimumFractionDigits = 0
+        formatter.maximumFractionDigits = 3
+        return formatter.string(from: quantity as NSDecimalNumber) ?? "\(quantity)"
     }
 }
 

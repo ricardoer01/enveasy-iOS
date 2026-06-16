@@ -292,10 +292,13 @@ struct OrderDetailView: View {
             // Refetch for cancelledAt / cancellationReason
             order = try await service.order(id: orderId)
             ordersStore?.updateStatus(of: orderId, to: .cancelled)
+            Haptics.notify(.success)
         } catch let error as APIError {
             errorMessage = error.errorDescription
+            Haptics.notify(.error)
         } catch {
             errorMessage = error.localizedDescription
+            Haptics.notify(.error)
         }
     }
 }

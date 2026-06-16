@@ -143,10 +143,13 @@ struct CheckoutView: View {
                 let created = try await service.placeOrder(request)
                 cart.clear()
                 placedOrder = created
+                Haptics.notify(.success)
             } catch let error as APIError {
                 errorMessage = error.errorDescription
+                Haptics.notify(.error)
             } catch {
                 errorMessage = error.localizedDescription
+                Haptics.notify(.error)
             }
         }
     }
