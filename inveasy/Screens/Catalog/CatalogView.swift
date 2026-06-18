@@ -69,23 +69,11 @@ struct CatalogView: View {
 
 // MARK: - Category chips
 
-/// Horizontal chip strip without `ScrollView`. iOS 26's `ScrollView(.horizontal)`
-/// was leaking vertical/diagonal pans into the chip row after a NavigationStack
-/// rebuild (e.g. provider switch), and no combination of `.contentMargins`,
-/// `.safeAreaInset`, `.scrollBounceBehavior(axes:)`, or `.simultaneousGesture`
-/// reliably contained it. Rolling the pan by hand removes the entire scroll
-/// subsystem — the `DragGesture` only ever writes the horizontal component of
-/// `translation`, so vertical motion is structurally impossible.
 private struct CategoryChips: View {
     let store: CatalogStore
 
-    @State private var offset: CGFloat = 0
-    @State private var dragBaseOffset: CGFloat = 0
-    @State private var contentWidth: CGFloat = 0
-
     var body: some View {
-        GeometryReader { geo in
-            let maxScroll = max(0, contentWidth - geo.size.width)
+        ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 Chip(
                     label: "Todas",
@@ -103,71 +91,11 @@ private struct CategoryChips: View {
                 }
             }
             .padding(.horizontal)
-            // Pin the HStack to its natural horizontal size so the
-            // background `GeometryReader` measures the real content width
-            // — not whatever width the outer container would otherwise
-            // propose. Without this the measurement collapses to
-            // `geo.size.width` and `maxScroll` is always zero.
-            .fixedSize(horizontal: true, vertical: false)
-            .background(
-                GeometryReader { proxy in
-                    Color.clear
-                        .onAppear { contentWidth = proxy.size.width }
-                        .onChange(of: proxy.size.width) { _, new in
-                            contentWidth = new
-                            // Re-clamp if content shrank past current offset.
-                            let clamped = max(min(offset, 0), -max(0, new - geo.size.width))
-                            if clamped != offset {
-                                offset = clamped
-                                dragBaseOffset = clamped
-                            }
-                        }
-                }
-            )
-            .frame(height: 48)
-            .offset(x: offset)
-            // Flexible outer container provides the hit-test surface for
-            // the gesture; the HStack inside keeps its natural width and
-            // is leading-aligned. Visual overflow is clipped by the outer
-            // `.clipped()` on the GeometryReader's frame.
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 8)
-                    .onChanged { value in
-                        // Only the horizontal component is ever consulted.
-                        // The vertical component is dropped on the floor.
-                        // Interpolate toward the finger with an interactive
-                        // spring so the strip glides continuously during
-                        // the drag instead of snapping 1:1 — gives it a
-                        // subtle trailing inertia like a native scroll.
-                        let proposed = dragBaseOffset + value.translation.width
-                        let target = max(min(proposed, 0), -maxScroll)
-                        withAnimation(.interactiveSpring(response: 0.2, dampingFraction: 0.82, blendDuration: 0.1)) {
-                            offset = target
-                        }
-                    }
-                    .onEnded { value in
-                        // Project where the finger would have ended up if
-                        // it kept its release velocity through natural
-                        // deceleration, then spring-animate to that point.
-                        // Gives the strip the same glide-to-stop feel as a
-                        // native ScrollView without re-introducing one.
-                        // Amplify SwiftUI's conservative projection so a
-                        // flick carries the strip a bit further, and use a
-                        // longer spring response for the glide-out.
-                        let projected = value.predictedEndTranslation.width * 1.4
-                        let predicted = dragBaseOffset + projected
-                        let target = max(min(predicted, 0), -maxScroll)
-                        withAnimation(.spring(response: 0.85, dampingFraction: 0.85)) {
-                            offset = target
-                        }
-                        dragBaseOffset = target
-                    }
-            )
+            .padding(.vertical, 8)
         }
         .frame(height: 48)
         .clipped()
+        .scrollBounceBehavior(.basedOnSize)
     }
 }
 
