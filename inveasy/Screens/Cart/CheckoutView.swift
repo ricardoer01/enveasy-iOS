@@ -4,6 +4,7 @@
 //
 
 import SwiftUI
+import MapKit
 
 struct CheckoutView: View {
     @Environment(AppState.self) private var app
@@ -23,6 +24,18 @@ struct CheckoutView: View {
 
     @State private var pickupLocation = ""
     @State private var notes = ""
+
+    @State private var addressCompleter = AddressCompleter()
+    /// One-shot flag that swallows the `onChange` that fires immediately
+    /// after `applySuggestion` writes back to `line1`. Without it, the
+    /// programmatic write would re-trigger the completer and re-populate
+    /// suggestions for the address the user just picked.
+    @State private var suppressNextCompleterUpdate = false
+    /// Whether the "Editar detalles" disclosure (city/state/zip/country/
+    /// neighborhood) is expanded. Stays collapsed in the autocomplete-happy
+    /// path; auto-expands when validation needs the user's attention on a
+    /// hidden field.
+    @State private var showAddressDetails = false
 
     @State private var isSubmitting = false
     @State private var errorMessage: String?
@@ -59,20 +72,47 @@ struct CheckoutView: View {
                             Section("Dirección de envío") {
                                 TextField("Dirección", text: $line1)
                                     .textContentType(.streetAddressLine1)
+                                    .onChange(of: line1) { _, newValue in
+                                        if suppressNextCompleterUpdate {
+                                            suppressNextCompleterUpdate = false
+                                            return
+                                        }
+                                        addressCompleter.update(query: newValue)
+                                    }
+
+                                ForEach(addressCompleter.results, id: \.self) { completion in
+                                    Button {
+                                        Task { await applySuggestion(completion) }
+                                    } label: {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(completion.title)
+                                                .foregroundStyle(.primary)
+                                            if !completion.subtitle.isEmpty {
+                                                Text(completion.subtitle)
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                        }
+                                    }
+                                }
+
                                 TextField("Interior / Depto. (opcional)", text: $line2)
                                     .textContentType(.streetAddressLine2)
-                                TextField("Colonia", text: $neighborhood)
-                                TextField("Ciudad", text: $city)
-                                    .textContentType(.addressCity)
-                                TextField("Estado", text: $state)
-                                    .textContentType(.addressState)
-                                TextField("Código postal", text: $zip)
-                                    .keyboardType(.numberPad)
-                                    .textContentType(.postalCode)
-                                TextField("País", text: $country)
-                                    .textContentType(.countryName)
                                 TextField("Referencias (opcional)", text: $references, axis: .vertical)
                                     .lineLimit(2...4)
+
+                                DisclosureGroup("Editar detalles", isExpanded: $showAddressDetails) {
+                                    TextField("Colonia", text: $neighborhood)
+                                    TextField("Ciudad", text: $city)
+                                        .textContentType(.addressCity)
+                                    TextField("Estado", text: $state)
+                                        .textContentType(.addressState)
+                                    TextField("Código postal", text: $zip)
+                                        .keyboardType(.numberPad)
+                                        .textContentType(.postalCode)
+                                    TextField("País", text: $country)
+                                        .textContentType(.countryName)
+                                }
                             }
                         } else {
                             Section("Sucursal de recogida (opcional)") {
@@ -129,6 +169,12 @@ struct CheckoutView: View {
         // backend's generic "Validation failed").
         if fulfillment == .delivery, let missing = missingDeliveryFields() {
             errorMessage = "Completa los campos requeridos: \(missing.joined(separator: ", "))."
+            // If any of the missing fields lives inside the disclosure,
+            // expand it so the user can see what to fill.
+            let hiddenFieldsMissing = !Set(missing).isDisjoint(with: ["ciudad", "estado", "código postal"])
+            if hiddenFieldsMissing {
+                showAddressDetails = true
+            }
             Haptics.notify(.error)
             return
         }
@@ -161,6 +207,37 @@ struct CheckoutView: View {
                 errorMessage = error.localizedDescription
                 Haptics.notify(.error)
             }
+        }
+    }
+
+    /// Pick a completer suggestion, resolve it to a placemark, and populate
+    /// the structured form fields. Treated as best-effort: any individual
+    /// field that's missing on the placemark stays untouched so the user can
+    /// fill it manually.
+    private func applySuggestion(_ completion: MKLocalSearchCompletion) async {
+        do {
+            guard let placemark = try await addressCompleter.resolve(completion) else { return }
+            let street = [placemark.subThoroughfare, placemark.thoroughfare]
+                .compactMap { $0 }
+                .joined(separator: " ")
+            // Stop the next onChange from re-firing the completer with the
+            // value we're about to write.
+            if !street.isEmpty {
+                suppressNextCompleterUpdate = true
+                line1 = street
+            }
+            if let locality = placemark.locality { city = locality }
+            if let admin = placemark.administrativeArea { state = admin }
+            if let postal = placemark.postalCode { zip = postal }
+            if let nation = placemark.country { country = nation }
+            if let subLocality = placemark.subLocality, neighborhood.isEmpty {
+                neighborhood = subLocality
+            }
+            addressCompleter.clear()
+            Haptics.impact(.light)
+        } catch {
+            // Resolution failures aren't worth surfacing — the user can still
+            // type the address manually.
         }
     }
 
