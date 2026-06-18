@@ -96,7 +96,7 @@ struct CheckoutView: View {
                                     }
                                 }
 
-                                TextField("Interior / Depto. (opcional)", text: $line2)
+                                TextField("Número exterior / interior", text: $line2)
                                     .textContentType(.streetAddressLine2)
                                 TextField("Referencias (opcional)", text: $references, axis: .vertical)
                                     .lineLimit(2...4)
