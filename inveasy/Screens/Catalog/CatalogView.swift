@@ -20,7 +20,15 @@ struct CatalogView: View {
             }
             .navigationTitle("Catálogo")
             .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: searchBinding, prompt: "Buscar productos")
+            // Pin the search bar so it stays visible regardless of which
+            // ScrollView (chips vs grid) the system uses as the reveal
+            // trigger. The default `.automatic` placement would otherwise
+            // hide the bar inconsistently after navigating back to this tab.
+            .searchable(
+                text: searchBinding,
+                placement: .navigationBarDrawer(displayMode: .always),
+                prompt: "Buscar productos"
+            )
             .onSubmit(of: .search) {
                 Task { await store.submitSearch() }
             }

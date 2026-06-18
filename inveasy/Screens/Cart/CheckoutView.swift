@@ -123,6 +123,16 @@ struct CheckoutView: View {
     }
 
     private func submit() {
+        // Client-side guard: a delivery order needs at least the four core
+        // address fields. Catching this here keeps us from sending an order
+        // we know the API will reject (and gives a clearer message than the
+        // backend's generic "Validation failed").
+        if fulfillment == .delivery, let missing = missingDeliveryFields() {
+            errorMessage = "Completa los campos requeridos: \(missing.joined(separator: ", "))."
+            Haptics.notify(.error)
+            return
+        }
+
         let address = fulfillment == .delivery ? buildAddress() : nil
         let trimmedLocation = pickupLocation.trimmingCharacters(in: .whitespacesAndNewlines)
         let location = fulfillment == .pickup && !trimmedLocation.isEmpty ? trimmedLocation : nil
@@ -152,6 +162,20 @@ struct CheckoutView: View {
                 Haptics.notify(.error)
             }
         }
+    }
+
+    /// Returns the human-readable names of the required delivery fields that
+    /// are missing, or nil if the address is complete.
+    private func missingDeliveryFields() -> [String]? {
+        func empty(_ value: String) -> Bool {
+            value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        var missing: [String] = []
+        if empty(line1) { missing.append("dirección") }
+        if empty(city) { missing.append("ciudad") }
+        if empty(state) { missing.append("estado") }
+        if empty(zip) { missing.append("código postal") }
+        return missing.isEmpty ? nil : missing
     }
 
     private func buildAddress() -> ShippingAddress? {
