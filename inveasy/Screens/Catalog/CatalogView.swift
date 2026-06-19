@@ -6,6 +6,7 @@
 import SwiftUI
 
 struct CatalogView: View {
+    @Environment(AppState.self) private var app
     @State private var store: CatalogStore
 
     init(client: APIClient) {
@@ -15,19 +16,46 @@ struct CatalogView: View {
     var body: some View {
         NavigationStack {
             ProductsGrid(store: store)
+                // Apply `.refreshable` BEFORE the chips' `.safeAreaInset`.
+                // `.refreshable` writes a `RefreshAction` into the
+                // `\.refresh` environment value, which propagates to every
+                // descendant ScrollView. If applied after the inset, the
+                // chips' inner ScrollView inherits it and installs a
+                // pull-to-refresh recognizer — that recognizer is what
+                // lets vertical pans drag the strip after a NavigationStack
+                // rebuild. Scoping `.refreshable` to ProductsGrid only
+                // keeps the recognizer off the chips.
+                .refreshable {
+                    await store.reloadProducts()
+                }
                 // Pin the chips above the products grid as a top safe-area
                 // inset. This takes the chip strip OUT of the scrolling
                 // content area, so it can't be coupled to the products
                 // grid's scroll gesture or to the navigation bar's
-                // search-drawer transitions — which is what was leaking
-                // vertical/diagonal pans into the chips after a provider
-                // switch rebuilt the NavigationStack.
+                // search-drawer transitions.
                 .safeAreaInset(edge: .top, spacing: 0) {
                     CategoryChips(store: store)
-                        .background(.bar)
+                        .background(.regularMaterial)
                 }
-                .navigationTitle("Catálogo")
                 .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    // Provider name sits centered where a title would,
+                    // styled smaller than a heading so it reads as
+                    // context ("which store am I shopping in?") rather
+                    // than a screen title.
+                    if let providerName = app.providers.current?.name {
+                        ToolbarItem(placement: .principal) {
+                            VStack(spacing: 0) {
+                                Text("Comprando en")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Text(providerName)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.primary)
+                            }
+                        }
+                    }
+                }
                 // Pin the search bar so it stays visible regardless of
                 // which ScrollView the system uses as the reveal trigger.
                 .searchable(
@@ -37,9 +65,6 @@ struct CatalogView: View {
                 )
                 .onSubmit(of: .search) {
                     Task { await store.submitSearch() }
-                }
-                .refreshable {
-                    await store.reloadProducts()
                 }
                 .alert("Error", isPresented: errorAlertBinding) {
                     Button("OK", role: .cancel) { }
@@ -72,30 +97,44 @@ struct CatalogView: View {
 private struct CategoryChips: View {
     let store: CatalogStore
 
+    private static let allID = "all"
+
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                Chip(
-                    label: "Todas",
-                    isSelected: store.selectedCategoryId == nil
-                ) {
-                    Task { await store.selectCategory(nil) }
-                }
-                ForEach(store.categories) { category in
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 16) {
                     Chip(
-                        label: category.name,
-                        isSelected: store.selectedCategoryId == category.id
+                        label: "Todas",
+                        isSelected: store.selectedCategoryId == nil
                     ) {
-                        Task { await store.selectCategory(category.id) }
+                        Task { await store.selectCategory(nil) }
+                    }
+                    .id(Self.allID)
+                    ForEach(store.categories) { category in
+                        Chip(
+                            label: category.name,
+                            isSelected: store.selectedCategoryId == category.id
+                        ) {
+                            Task { await store.selectCategory(category.id) }
+                        }
+                        .id(category.id.uuidString)
                     }
                 }
+                .padding(.horizontal)
             }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
+            
+            .frame(height: 44)
+            .clipped()
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            // Keep the selected chip visible. If the user picks one that's
+            // off-screen — or returns to the tab with selection set — scroll
+            // it into the center so it's always discoverable.
+            .onChange(of: store.selectedCategoryId) { _, newId in
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    proxy.scrollTo(newId?.uuidString ?? Self.allID, anchor: .center)
+                }
+            }
         }
-        .frame(height: 48)
-        .clipped()
-        .scrollBounceBehavior(.basedOnSize)
     }
 }
 
@@ -106,14 +145,17 @@ private struct Chip: View {
 
     var body: some View {
         Button(action: action) {
-            Text(label)
-                .font(.subheadline)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 8).fill(isSelected ? Color.accentColor : Color(.secondarySystemBackground))
-                )
-                .foregroundStyle(isSelected ? Color.white : Color.primary)
+            VStack(spacing: 4) {
+                Text(label)
+                    .font(.subheadline)
+                    .fontWeight(isSelected ? .semibold : .regular)
+                    .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                Rectangle()
+                    .fill(isSelected ? Color.accentColor : Color.clear)
+                    .frame(height: 2)
+            }
+            .padding(.top, 10)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

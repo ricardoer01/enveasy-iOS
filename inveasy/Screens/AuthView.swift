@@ -14,14 +14,17 @@ struct AuthView: View {
     @State private var mode: Mode = .login
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
+        ScrollView {
+            VStack(spacing: 24) {
+                BrandHero()
+                    .padding(.top, 32)
+
                 Picker("Modo", selection: $mode) {
                     Text("Iniciar sesión").tag(Mode.login)
                     Text("Crear cuenta").tag(Mode.register)
                 }
                 .pickerStyle(.segmented)
-                .padding()
+                .padding(.horizontal)
 
                 Group {
                     switch mode {
@@ -29,9 +32,85 @@ struct AuthView: View {
                     case .register: RegisterForm()
                     }
                 }
+                .padding(.horizontal)
             }
-            .navigationTitle("Inveasy")
-            .navigationBarTitleDisplayMode(.inline)
+            .padding(.bottom, 32)
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .background(Color(.systemGroupedBackground))
+    }
+}
+
+// MARK: - Brand hero
+
+private struct BrandHero: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "bag.fill")
+                .font(.system(size: 36, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 76, height: 76)
+                .background(Color.blue, in: RoundedRectangle(cornerRadius: 20))
+                .shadow(color: Color.blue.opacity(0.3), radius: 10, y: 6)
+
+            Text("Bienvenido a Inveasy")
+                .font(.title2.weight(.bold))
+
+            Text("Compra a domicilio en tus tiendas favoritas")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+        }
+    }
+}
+
+// MARK: - Field styling
+
+private struct AuthFieldChrome<Content: View>: View {
+    let icon: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 16))
+                .foregroundStyle(.secondary)
+                .frame(width: 20)
+            content
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+private struct PasswordField: View {
+    let title: String
+    @Binding var text: String
+    var textContentType: UITextContentType = .password
+    @State private var isRevealed = false
+
+    var body: some View {
+        AuthFieldChrome(icon: "lock") {
+            Group {
+                if isRevealed {
+                    TextField(title, text: $text)
+                        .textContentType(textContentType)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                } else {
+                    SecureField(title, text: $text)
+                        .textContentType(textContentType)
+                }
+            }
+            Button {
+                isRevealed.toggle()
+            } label: {
+                Image(systemName: isRevealed ? "eye.slash" : "eye")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
         }
     }
 }
@@ -40,6 +119,9 @@ struct AuthView: View {
 
 private struct LoginForm: View {
     @Environment(AppState.self) private var app
+
+    private enum Field: Hashable { case email, password }
+    @FocusState private var focusedField: Field?
 
     @State private var email = ""
     @State private var password = ""
@@ -51,43 +133,53 @@ private struct LoginForm: View {
     }
 
     var body: some View {
-        Form {
-            Section("Datos") {
-                TextField("Correo", text: $email)
-                    .keyboardType(.emailAddress)
-                    .textContentType(.emailAddress)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
+        VStack(spacing: 16) {
+            VStack(spacing: 12) {
+                AuthFieldChrome(icon: "envelope") {
+                    TextField("Correo", text: $email)
+                        .keyboardType(.emailAddress)
+                        .textContentType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .focused($focusedField, equals: .email)
+                        .submitLabel(.next)
+                        .onSubmit { focusedField = .password }
+                        .onChange(of: email) { _, _ in errorMessage = nil }
+                }
 
-                SecureField("Contraseña", text: $password)
-                    .textContentType(.password)
+                PasswordField(title: "Contraseña", text: $password)
+                    .focused($focusedField, equals: .password)
+                    .submitLabel(.go)
+                    .onSubmit(submit)
+                    .onChange(of: password) { _, _ in errorMessage = nil }
             }
 
             if let errorMessage {
-                Section {
-                    Text(errorMessage)
-                        .foregroundStyle(.red)
-                }
+                Text(errorMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            Section {
-                Button(action: submit) {
-                    HStack {
-                        Spacer()
-                        if isSubmitting {
-                            ProgressView()
-                        } else {
-                            Text("Iniciar sesión").bold()
-                        }
-                        Spacer()
+            Button(action: submit) {
+                Group {
+                    if isSubmitting {
+                        ProgressView().tint(.white)
+                    } else {
+                        Text("Iniciar sesión").bold()
                     }
                 }
-                .disabled(!canSubmit)
+                .frame(maxWidth: .infinity)
             }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(!canSubmit)
         }
+        .onAppear { focusedField = .email }
     }
 
     private func submit() {
+        guard canSubmit else { return }
         Task { @MainActor in
             isSubmitting = true
             errorMessage = nil
@@ -96,8 +188,10 @@ private struct LoginForm: View {
                 try await app.signIn(email: email, password: password)
             } catch let error as APIError {
                 errorMessage = error.errorDescription
+                Haptics.notify(.error)
             } catch {
                 errorMessage = error.localizedDescription
+                Haptics.notify(.error)
             }
         }
     }
@@ -107,6 +201,9 @@ private struct LoginForm: View {
 
 private struct RegisterForm: View {
     @Environment(AppState.self) private var app
+
+    private enum Field: Hashable { case name, email, password, phone }
+    @FocusState private var focusedField: Field?
 
     @State private var name = ""
     @State private var email = ""
@@ -124,51 +221,73 @@ private struct RegisterForm: View {
     }
 
     var body: some View {
-        Form {
-            Section("Datos") {
-                TextField("Nombre completo", text: $name)
-                    .textContentType(.name)
-                    .autocorrectionDisabled()
+        VStack(spacing: 16) {
+            VStack(spacing: 12) {
+                AuthFieldChrome(icon: "person") {
+                    TextField("Nombre completo", text: $name)
+                        .textContentType(.name)
+                        .autocorrectionDisabled()
+                        .focused($focusedField, equals: .name)
+                        .submitLabel(.next)
+                        .onSubmit { focusedField = .email }
+                        .onChange(of: name) { _, _ in errorMessage = nil }
+                }
 
-                TextField("Correo", text: $email)
-                    .keyboardType(.emailAddress)
-                    .textContentType(.emailAddress)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
+                AuthFieldChrome(icon: "envelope") {
+                    TextField("Correo", text: $email)
+                        .keyboardType(.emailAddress)
+                        .textContentType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .focused($focusedField, equals: .email)
+                        .submitLabel(.next)
+                        .onSubmit { focusedField = .password }
+                        .onChange(of: email) { _, _ in errorMessage = nil }
+                }
 
-                SecureField("Contraseña (mín. 8)", text: $password)
-                    .textContentType(.newPassword)
+                PasswordField(title: "Contraseña (mín. 8)", text: $password, textContentType: .newPassword)
+                    .focused($focusedField, equals: .password)
+                    .submitLabel(.next)
+                    .onSubmit { focusedField = .phone }
+                    .onChange(of: password) { _, _ in errorMessage = nil }
 
-                TextField("Teléfono", text: $phone)
-                    .keyboardType(.phonePad)
-                    .textContentType(.telephoneNumber)
+                AuthFieldChrome(icon: "phone") {
+                    TextField("Teléfono", text: $phone)
+                        .keyboardType(.phonePad)
+                        .textContentType(.telephoneNumber)
+                        .focused($focusedField, equals: .phone)
+                        .submitLabel(.go)
+                        .onSubmit(submit)
+                        .onChange(of: phone) { _, _ in errorMessage = nil }
+                }
             }
 
             if let errorMessage {
-                Section {
-                    Text(errorMessage)
-                        .foregroundStyle(.red)
-                }
+                Text(errorMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            Section {
-                Button(action: submit) {
-                    HStack {
-                        Spacer()
-                        if isSubmitting {
-                            ProgressView()
-                        } else {
-                            Text("Crear cuenta").bold()
-                        }
-                        Spacer()
+            Button(action: submit) {
+                Group {
+                    if isSubmitting {
+                        ProgressView().tint(.white)
+                    } else {
+                        Text("Crear cuenta").bold()
                     }
                 }
-                .disabled(!canSubmit)
+                .frame(maxWidth: .infinity)
             }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(!canSubmit)
         }
+        .onAppear { focusedField = .name }
     }
 
     private func submit() {
+        guard canSubmit else { return }
         let trimmedPhone = phone.trimmingCharacters(in: .whitespaces)
         Task { @MainActor in
             isSubmitting = true
@@ -183,8 +302,10 @@ private struct RegisterForm: View {
                 )
             } catch let error as APIError {
                 errorMessage = error.errorDescription
+                Haptics.notify(.error)
             } catch {
                 errorMessage = error.localizedDescription
+                Haptics.notify(.error)
             }
         }
     }

@@ -12,7 +12,8 @@ struct BrandHeader: View {
         Text("Inveasy")
             .font(.headline.weight(.semibold))
             .foregroundStyle(.white)
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal)
             .padding(.vertical, 8)
             .background(Color.blue.ignoresSafeArea(edges: .top))
     }
