@@ -54,9 +54,22 @@ final class AppState {
         try await persist(session)
     }
 
-    func register(name: String, email: String, password: String, phone: String) async throws {
+    /// Step 1 of registration. Creates the customer in `pending_verification`
+    /// and triggers the email-code send. Returns the `customerId` the caller
+    /// must pass to `verifyEmail` along with the user's 6-digit code.
+    func register(name: String, email: String, password: String, phone: String) async throws -> UUID {
         let request = RegisterRequest(name: name, email: email, password: password, phone: phone)
         let endpoint = try Endpoint.Hub.post("auth/register", body: request, requiresAuth: false)
+        let response = try await client.send(endpoint, as: RegisterResponse.self)
+        return response.customerId
+    }
+
+    /// Step 2 of registration. Trades the `customerId` from `register` plus the
+    /// user's 6-digit code for an `AuthSession`, persists tokens, and flips
+    /// auth state to `.signedIn`.
+    func verifyEmail(customerID: UUID, code: String) async throws {
+        let request = VerifyEmailRequest(customerId: customerID, code: code)
+        let endpoint = try Endpoint.Hub.post("auth/verify-email", body: request, requiresAuth: false)
         let session = try await client.send(endpoint, as: AuthSession.self)
         try await persist(session)
     }

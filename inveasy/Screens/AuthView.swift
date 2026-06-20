@@ -11,7 +11,15 @@ struct AuthView: View {
         case login, register
     }
 
+    struct PendingVerification: Equatable {
+        let customerID: UUID
+        let email: String
+    }
+
     @State private var mode: Mode = .login
+    /// Set after a successful `/auth/register`. While non-nil the screen
+    /// hides the login/register forms and shows the code-entry step.
+    @State private var pendingVerification: PendingVerification?
 
     var body: some View {
         ScrollView {
@@ -19,20 +27,36 @@ struct AuthView: View {
                 BrandHero()
                     .padding(.top, 32)
 
-                Picker("Modo", selection: $mode) {
-                    Text("Iniciar sesión").tag(Mode.login)
-                    Text("Crear cuenta").tag(Mode.register)
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
-
-                Group {
-                    switch mode {
-                    case .login: LoginForm()
-                    case .register: RegisterForm()
+                if let pending = pendingVerification {
+                    VerifyForm(
+                        customerID: pending.customerID,
+                        email: pending.email,
+                        onBack: { pendingVerification = nil }
+                    )
+                    .padding(.horizontal)
+                } else {
+                    Picker("Modo", selection: $mode) {
+                        Text("Iniciar sesión").tag(Mode.login)
+                        Text("Crear cuenta").tag(Mode.register)
                     }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal)
+
+                    Group {
+                        switch mode {
+                        case .login:
+                            LoginForm()
+                        case .register:
+                            RegisterForm(onCodeSent: { customerID, email in
+                                pendingVerification = PendingVerification(
+                                    customerID: customerID,
+                                    email: email
+                                )
+                            })
+                        }
+                    }
+                    .padding(.horizontal)
                 }
-                .padding(.horizontal)
             }
             .padding(.bottom, 32)
         }
@@ -202,6 +226,10 @@ private struct LoginForm: View {
 private struct RegisterForm: View {
     @Environment(AppState.self) private var app
 
+    /// Invoked after `/auth/register` succeeds, handing the parent the
+    /// `customerId` and the email needed for the verification step.
+    let onCodeSent: (_ customerID: UUID, _ email: String) -> Void
+
     private enum Field: Hashable { case name, email, password, phone }
     @FocusState private var focusedField: Field?
 
@@ -289,17 +317,117 @@ private struct RegisterForm: View {
     private func submit() {
         guard canSubmit else { return }
         let trimmedPhone = phone.trimmingCharacters(in: .whitespaces)
+        let trimmedEmail = email.trimmingCharacters(in: .whitespaces)
+        let trimmedName = name.trimmingCharacters(in: .whitespaces)
         Task { @MainActor in
             isSubmitting = true
             errorMessage = nil
             defer { isSubmitting = false }
             do {
-                try await app.register(
-                    name: name.trimmingCharacters(in: .whitespaces),
-                    email: email,
+                let customerID = try await app.register(
+                    name: trimmedName,
+                    email: trimmedEmail,
                     password: password,
                     phone: trimmedPhone
                 )
+                Haptics.notify(.success)
+                onCodeSent(customerID, trimmedEmail)
+            } catch let error as APIError {
+                errorMessage = error.errorDescription
+                Haptics.notify(.error)
+            } catch {
+                errorMessage = error.localizedDescription
+                Haptics.notify(.error)
+            }
+        }
+    }
+}
+
+// MARK: - Verify email
+
+private struct VerifyForm: View {
+    @Environment(AppState.self) private var app
+
+    let customerID: UUID
+    let email: String
+    let onBack: () -> Void
+
+    @FocusState private var isCodeFocused: Bool
+    @State private var code = ""
+    @State private var isSubmitting = false
+    @State private var errorMessage: String?
+
+    private var canSubmit: Bool {
+        code.count == 6 && code.allSatisfy(\.isNumber) && !isSubmitting
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            VStack(spacing: 4) {
+                Text("Verifica tu correo")
+                    .font(.title3.weight(.semibold))
+                Text("Te enviamos un código de 6 dígitos a")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Text(email)
+                    .font(.subheadline.weight(.semibold))
+            }
+
+            AuthFieldChrome(icon: "key") {
+                TextField("Código de 6 dígitos", text: $code)
+                    .keyboardType(.numberPad)
+                    .textContentType(.oneTimeCode)
+                    .focused($isCodeFocused)
+                    .onChange(of: code) { _, newValue in
+                        // Strip non-digits and cap length to 6 — the
+                        // number-pad keyboard already filters most of
+                        // this, but pasted values may include letters.
+                        let digits = newValue.filter(\.isNumber)
+                        let trimmed = String(digits.prefix(6))
+                        if trimmed != newValue { code = trimmed }
+                        errorMessage = nil
+                    }
+            }
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Button(action: submit) {
+                Group {
+                    if isSubmitting {
+                        ProgressView().tint(.white)
+                    } else {
+                        Text("Verificar").bold()
+                    }
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(!canSubmit)
+
+            Button("Cambiar correo", action: onBack)
+                .font(.footnote)
+                .disabled(isSubmitting)
+        }
+        .onAppear { isCodeFocused = true }
+    }
+
+    private func submit() {
+        guard canSubmit else { return }
+        Task { @MainActor in
+            isSubmitting = true
+            errorMessage = nil
+            defer { isSubmitting = false }
+            do {
+                try await app.verifyEmail(customerID: customerID, code: code)
+                Haptics.notify(.success)
+                // Success transitions auth state to `.signedIn`, which
+                // pops this whole view via RootView.
             } catch let error as APIError {
                 errorMessage = error.errorDescription
                 Haptics.notify(.error)
