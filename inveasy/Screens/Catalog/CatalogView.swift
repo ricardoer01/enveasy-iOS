@@ -244,6 +244,18 @@ private struct ProductCard: View {
             .clipped()
             .background(Color(.secondarySystemBackground))
             .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(alignment: .topLeading) {
+                if product.isLowStock {
+                    Label("Bajo stock", systemImage: "exclamationmark.triangle.fill")
+                        .labelStyle(.titleAndIcon)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.orange, in: Capsule())
+                        .padding(8)
+                }
+            }
 
             Text(product.name)
                 .font(.subheadline)

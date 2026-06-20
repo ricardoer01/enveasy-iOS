@@ -145,14 +145,18 @@ private struct StockBadge: View {
     let product: Product
 
     var body: some View {
-        if product.isInStock {
-            Label("En existencia", systemImage: "checkmark.circle.fill")
-                .font(.subheadline)
-                .foregroundStyle(.green)
-        } else {
+        if !product.isInStock {
             Label("Agotado", systemImage: "xmark.circle.fill")
                 .font(.subheadline)
                 .foregroundStyle(.red)
+        } else if product.isLowStock {
+            Label("Pocas unidades disponibles", systemImage: "exclamationmark.triangle.fill")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.orange)
+        } else {
+            Label("En existencia", systemImage: "checkmark.circle.fill")
+                .font(.subheadline)
+                .foregroundStyle(.green)
         }
     }
 }

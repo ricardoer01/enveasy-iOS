@@ -95,5 +95,18 @@ struct Product: Identifiable, Decodable, Hashable, Sendable {
 }
 
 extension Product {
+    /// Below this quantity, surface a low-stock warning in the UI. Held as
+    /// a single source of truth so the badge in the detail view and the
+    /// overlay on the catalog card stay in sync.
+    static let lowStockThreshold: Decimal = 10
+
     var isInStock: Bool { stockQuantity > 0 }
+
+    /// True when there's stock remaining but it's below the warning
+    /// threshold. Explicitly excludes the zero case so out-of-stock
+    /// products fall through to the "Agotado" treatment instead of a
+    /// nonsensical "low" indicator on an empty shelf.
+    var isLowStock: Bool {
+        stockQuantity > 0 && stockQuantity < Product.lowStockThreshold
+    }
 }
